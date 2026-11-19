@@ -470,9 +470,10 @@ const ROLE = {
   e:{nm:'렌즈', job:'관찰 담당', bad:'스피커 고장', can:'패널의 색과 기호, 명판을 전부 봅니다.', cant:'만질 수 없고 무전은 그림 신호만 보냅니다.'},
   b:{nm:'칩', job:'해설 담당', bad:'패널 연결 끊김', can:'정비 매뉴얼을 가진 유일한 로봇.', cant:'패널이 전혀 보이지 않습니다.'}
 };
-const DIFF = {m:{n:3, t:480, s:5, r:'b', a:1, label:'중'}, e:{n:3, t:480, s:5, r:'b', a:0, label:'상'}, h:{n:5, t:360, s:3, r:'a', a:0, label:'최상'}};
+const DIFF = {l:{n:2, t:0, s:7, r:'b', a:3, pool:['c','s','q'], label:'하'}, m:{n:3, t:480, s:5, r:'b', a:2, label:'중'}, e:{n:3, t:480, s:5, r:'b', a:0, label:'상'}, h:{n:5, t:360, s:3, r:'a', a:0, label:'최상'}};
 const lvl = df => DIFF[df] || DIFF.m;
 const assist = df => !!lvl(df).a;
+const untimed = df => !lvl(df).t;
 const ACT_K = new Set(['cut','press','inc','dec','ok','tog','dir']);
 const isBasic = df => lvl(df).r === 'b';
 const ROBOT = {
@@ -583,7 +584,7 @@ const hostPeer = () => others().filter(p => p.presence.role === 'h' && validG(p.
 
 function pubG() {
   const G = S.G;
-  if (G.ph === 'play') G.rem = Math.max(0, G.dl - Date.now());
+  if (G.ph === 'play' && G.dl) G.rem = Math.max(0, G.dl - Date.now());
   return {id:G.id, ph:G.ph, rem:Math.round(G.rem), st:G.st, df:G.df, cm:G.cm, hs:G.hs, np:G.np, m:G.m, why:G.why, hl:G.hl, hint:G.hint ? {i:G.hint.i} : null};
 }
 function syncPresence() {
@@ -637,16 +638,16 @@ async function connect() {
 function startGame(practice) {
   const d = DIFF[S.cfg.df];
   const np = genPlate();
-  const m = shuffle(['c','p','d','s','q']).slice(0, d.n).map(t => d.r === 'b' ? genB[t]() : gen[t](np));
+  const m = shuffle(d.pool || ['c','p','d','s','q']).slice(0, d.n).map(t => d.r === 'b' ? genB[t]() : gen[t](np));
   const eyes = others().filter(p => p.presence.role === 'e').length;
   S.G = {id:Math.random().toString(36).slice(2, 10), ph:'play', st:0, df:S.cfg.df, cm:S.cfg.cm,
-         hs:practice ? 0 : (eyes ? 0 : 1), np, m, dl:Date.now() + d.t * 1000, rem:d.t * 1000, why:'', hl:d.a ? 2 : 0, hint:null};
+         hs:practice ? 0 : (eyes ? 0 : 1), np, m, dl:d.t ? Date.now() + d.t * 1000 : 0, rem:d.t * 1000, why:'', hl:d.a || 0, hint:null};
   S.practice = !!practice; S.pview = 'h'; S.mtab = 'g';
   syncPresence(); renderAll();
 }
 function endGame(ph, why) {
   const G = S.G; if (!G || G.ph !== 'play') return;
-  G.rem = Math.max(0, G.dl - Date.now()); G.ph = ph; G.why = why || '';
+  if (G.dl) G.rem = Math.max(0, G.dl - Date.now()); G.ph = ph; G.why = why || '';
 }
 function strike() {
   const G = S.G; G.st++;
@@ -790,11 +791,11 @@ function renderLobby() {
   const seg = (key, opts) => '<div class="seg" role="group">' + opts.map(([v, l]) =>
     '<button data-a="cfg" data-k="' + key + '" data-v="' + v + '" aria-pressed="' + (cfg[key] === v) + '"' + (lock ? ' disabled' : '') + '>' + l + '</button>').join('') + '</div>';
   setHTML($('#settings'),
-    '<div><span class="lab">난이도</span>' + seg('df', [['m','중 (추천)'], ['e','상'], ['h','최상']]) + '</div>' +
+    '<div><span class="lab">난이도</span>' + seg('df', [['l','하'], ['m','중 (추천)'], ['e','상'], ['h','최상']]) + '</div>' +
     '<div><span class="lab">무전 방식</span>' + seg('cm', [['r','제한 무전'], ['f','자유 채팅']]) + '</div>' +
     '<p class="hint" style="flex-basis:100%"><b>' + lvl(cfg.df).label + ':</b> ' + (isBasic(cfg.df) ? '기본 규칙' : '심화 규칙(명판을 읽어야 풀립니다)') +
-      ', 장치 ' + lvl(cfg.df).n + '개, ' + Math.round(lvl(cfg.df).t / 60) + '분, 실수 ' + lvl(cfg.df).s + '번이면 실패. ' +
-      (assist(cfg.df) ? '도움 기능: 렌즈가 패널을 눌러 위치를 가리킬 수 있고, 집게도 장치 이름을 보며, 힌트 2번, 실수해도 맞게 한 것은 남습니다.'
+      ', 장치 ' + lvl(cfg.df).n + '개' + (lvl(cfg.df).pool ? '(케이블·스위치·순서 입력 중에서)' : '') + ', ' + (untimed(cfg.df) ? '시간 제한 없음' : Math.round(lvl(cfg.df).t / 60) + '분') + ', 실수 ' + lvl(cfg.df).s + '번이면 실패. ' +
+      (assist(cfg.df) ? '도움 기능: 렌즈가 패널을 눌러 위치를 가리킬 수 있고, 집게도 장치 이름을 보며, 힌트 ' + lvl(cfg.df).a + '번, 실수해도 맞게 한 것은 남습니다.'
                       : '도움 기능 없음.') + '</p>' +
     '<p class="hint" style="flex-basis:100%">' + (lock ? '설정은 집게를 맡은 사람이 정합니다. ' : '') +
     (cfg.cm === 'r' ? '제한 무전: 렌즈는 그림 신호만, 집게는 정해진 말만, 칩은 글로 보냅니다. 음성 통화 없이 할 때 재미있습니다.'
@@ -948,7 +949,7 @@ function manualHTML(g) {
     page = page.replace('순서가 틀리면 처음부터 다시 눌러야 합니다.', '순서가 틀려도 맞게 누른 패드는 그대로 남습니다.')
                .replace('<p class="note">틀리면 처음부터 다시 입력합니다.</p>', '<p class="note">틀려도 맞게 누른 것은 그대로 남습니다.</p>');
     page = page.replace('패널에 어떤 장치가 달렸는지는 렌즈만 볼 수 있습니다. 장치 번호와 종류부터 물어보세요.', '이번 패널의 장치는 위 목록에 나옵니다. 누르면 그 장치의 규칙이 열립니다. 색과 기호는 렌즈에게 물어보세요.');
-    if (S.mtab === 'g') page += '<p class="note">도움 기능: 렌즈는 패널을 눌러 집게에게 위치를 가리킬 수 있습니다. 막히면 집게가 장치마다 힌트를 쓸 수 있습니다 (한 판에 2번).</p>';
+    if (S.mtab === 'g') page += '<p class="note">도움 기능: 렌즈는 패널을 눌러 집게에게 위치를 가리킬 수 있습니다. 막히면 집게가 장치마다 힌트를 쓸 수 있습니다 (한 판에 ' + lvl(g.df).a + '번).</p>';
   }
   return '<div class="plate manual"><div class="head"><h2>정비 매뉴얼</h2><span>' + (isBasic(g.df) ? '기본 규칙' : '심화 규칙') + ' · 칩 전용 · 패널 신호 없음</span></div>' +
     '<div class="slots">' + g.m.map((m, i) => help && m
@@ -1022,7 +1023,7 @@ function renderResult(c) {
   if (c.mine) btn = '<button class="key go" data-a="leave">' + (S.practice ? '연습 끝내기' : '모두 로비로') + '</button>' + (S.practice ? '<button class="key" data-a="practice">다시 연습</button>' : '');
   else btn = '<p class="hint">집게가 로비로 돌아가면 함께 이동합니다.</p>';
   setHTML($('#result'), '<div class="plate result ' + (won ? 'won' : 'lost') + '"><h2>' + (won ? '코어 정지!' : '멜트다운') + '</h2><p>' + why + '</p>' +
-    '<div class="stats"><div><b>' + fmt(+g.rem || 0) + '</b>남은 시간</div><div><b>' + (+g.st || 0) + '/' + lvl(g.df).s + '</b>경고등</div><div><b>' + solved + '/' + g.m.length + '</b>해결한 장치</div></div>' + btn + '</div>');
+    '<div class="stats"><div><b>' + (untimed(g.df) ? '∞' : fmt(+g.rem || 0)) + '</b>' + (untimed(g.df) ? '시간 제한 없음' : '남은 시간') + '</div><div><b>' + (+g.st || 0) + '/' + lvl(g.df).s + '</b>경고등</div><div><b>' + solved + '/' + g.m.length + '</b>해결한 장치</div></div>' + btn + '</div>');
 }
 
 function renderAll() {
@@ -1051,8 +1052,10 @@ function renderAll() {
 
 let lastSec = -1;
 function paintTimer(c) {
+  const t = $('#timer');
+  if (untimed(c.g.df)) { if (t.textContent !== '∞') t.textContent = '∞'; t.classList.remove('low'); t.setAttribute('aria-label', '시간 제한 없음'); return; }
   const ms = c.g.ph === 'play' ? c.dl - Date.now() : (+c.g.rem || 0);
-  const t = $('#timer'), txt = fmt(ms);
+  const txt = fmt(ms);
   if (t.textContent !== txt) t.textContent = txt;
   const low = ms <= 30000; t.classList.toggle('low', low);
   const sec = Math.ceil(ms / 1000);
@@ -1063,7 +1066,7 @@ let lastSync = 0;
 setInterval(() => {
   const G = S.G;
   if (G && G.ph === 'play') {
-    if (G.dl - Date.now() <= 0) { endGame('lost', 'time'); syncPresence(); renderAll(); return; }
+    if (G.dl && G.dl - Date.now() <= 0) { endGame('lost', 'time'); syncPresence(); renderAll(); return; }
     if (G.hint && Date.now() > G.hint.until) { G.hint = null; syncPresence(); renderAll(); }
     if (!S.practice && Date.now() - lastSync > 1000) { lastSync = Date.now(); syncPresence(); }
   }
