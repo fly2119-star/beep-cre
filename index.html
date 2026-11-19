@@ -137,6 +137,20 @@ main{max-width:1120px;margin:0 auto;padding:20px 16px 48px}
 .mod.ok header .st{background:var(--c-g)}
 .mod.ok header::after{content:'해결';font-size:12px;font-weight:800;color:#1c6e3e}
 .mod.ro button{pointer-events:none}
+.mod.pointable .cable,.mod.pointable .pad,.mod.pointable .tile,.mod.pointable .led,.mod.pointable .dot,.mod.pointable .sw,.mod.pointable .key{cursor:pointer}
+.pt{outline:4px solid var(--accent);outline-offset:3px;border-radius:10px}
+.glow{outline:4px solid #2f9f5d;outline-offset:3px;border-radius:10px;box-shadow:0 0 0 8px rgba(47,159,93,.25)}
+.cable.pt,.cable.glow{border-radius:8px}
+.hintbtn{margin-left:auto;border:2px solid #1c6e3e;background:#dff0e4;color:#1c6e3e;border-radius:8px;padding:1px 10px;font-weight:800;font-size:13px}
+.mod header .hintbtn+.st{margin-left:8px}
+.hintbtn:disabled{opacity:.4}
+.hintnum{flex-basis:100%;font-weight:800;color:#1c6e3e;background:#dff0e4;border:2px solid #1c6e3e;border-radius:8px;padding:4px 10px;justify-self:start}
+.tip{border-left:5px solid var(--accent);padding:4px 0 4px 10px;font-weight:600;margin:0 0 12px}
+.slots button{font-family:var(--f-mono);font-size:13px;border:2px solid var(--ink);border-radius:6px;padding:1px 8px;background:var(--plate-2)}
+.slots button.ok{background:var(--c-g);color:#fff}
+.slots button.cur{outline:3px solid var(--accent);outline-offset:1px}
+@keyframes ptpulse{50%{outline-color:transparent}}
+@media (prefers-reduced-motion:no-preference){.pt{animation:ptpulse 1s steps(1) infinite}}
 .mod.ok button{pointer-events:none}
 .k-r{--k:var(--c-r)}.k-y{--k:var(--c-y)}.k-g{--k:var(--c-g)}.k-b{--k:var(--c-b)}.k-w{--k:var(--c-w)}
 .k-unk{--k:var(--unk)}
@@ -456,8 +470,10 @@ const ROLE = {
   e:{nm:'렌즈', job:'관찰 담당', bad:'스피커 고장', can:'패널의 색과 기호, 명판을 전부 봅니다.', cant:'만질 수 없고 무전은 그림 신호만 보냅니다.'},
   b:{nm:'칩', job:'해설 담당', bad:'패널 연결 끊김', can:'정비 매뉴얼을 가진 유일한 로봇.', cant:'패널이 전혀 보이지 않습니다.'}
 };
-const DIFF = {e:{n:3, t:480, s:5, r:'b', label:'쉬움'}, n:{n:4, t:420, s:4, r:'b', label:'보통'}, h:{n:5, t:360, s:3, r:'a', label:'어려움'}};
-const lvl = df => DIFF[df] || DIFF.e;
+const DIFF = {m:{n:3, t:480, s:5, r:'b', a:1, label:'중'}, e:{n:3, t:480, s:5, r:'b', a:0, label:'상'}, h:{n:5, t:360, s:3, r:'a', a:0, label:'최상'}};
+const lvl = df => DIFF[df] || DIFF.m;
+const assist = df => !!lvl(df).a;
+const ACT_K = new Set(['cut','press','inc','dec','ok','tog','dir']);
 const isBasic = df => lvl(df).r === 'b';
 const ROBOT = {
   h:'<svg viewBox="0 0 64 64" aria-hidden="true"><rect x="14" y="12" width="36" height="30" rx="6" class="rb"/><circle cx="32" cy="27" r="8" class="rl"/><path d="M27 22l10 10M37 22L27 32" class="rs"/><path d="M8 44v-9a4 4 0 0 1 8 0M56 44v-9a4 4 0 0 0-8 0M12 35v-8h2M52 35v-8h-2" class="rs"/><rect x="23" y="45" width="18" height="9" rx="2" class="rb"/></svg>',
@@ -547,7 +563,8 @@ const ans = (m, G) => isBasic(G.df) ? basic[m.t](m) : solve[m.t](m, G.np, G.st);
 
 /* ---------- state ---------- */
 const S = {
-  name:'', room:'MAIN', role:null, cfg:{df:'e', cm:'r'},
+  name:'', room:'MAIN', role:null, cfg:{df:'m', cm:'r'},
+  pt:null,
   G:null, practice:false, pview:'h', mtab:'g',
   msgs:[], mi:0, log:[], seen:new Set(), tray:[],
   ns:null, net:'wait', conn:false, peers:[], last:null,
@@ -567,7 +584,7 @@ const hostPeer = () => others().filter(p => p.presence.role === 'h' && validG(p.
 function pubG() {
   const G = S.G;
   if (G.ph === 'play') G.rem = Math.max(0, G.dl - Date.now());
-  return {id:G.id, ph:G.ph, rem:Math.round(G.rem), st:G.st, df:G.df, cm:G.cm, hs:G.hs, np:G.np, m:G.m, why:G.why};
+  return {id:G.id, ph:G.ph, rem:Math.round(G.rem), st:G.st, df:G.df, cm:G.cm, hs:G.hs, np:G.np, m:G.m, why:G.why, hl:G.hl, hint:G.hint ? {i:G.hint.i} : null};
 }
 function syncPresence() {
   if (!S.ns) return;
@@ -577,6 +594,7 @@ function syncPresence() {
     role:S.practice ? null : S.role,
     cfg:S.role === 'h' ? S.cfg : null,
     msgs:S.msgs,
+    pt:(!S.practice && S.role === 'e') ? S.pt : null,
     g:live ? pubG() : null
   }).catch(() => {});
 }
@@ -622,7 +640,7 @@ function startGame(practice) {
   const m = shuffle(['c','p','d','s','q']).slice(0, d.n).map(t => d.r === 'b' ? genB[t]() : gen[t](np));
   const eyes = others().filter(p => p.presence.role === 'e').length;
   S.G = {id:Math.random().toString(36).slice(2, 10), ph:'play', st:0, df:S.cfg.df, cm:S.cfg.cm,
-         hs:practice ? 0 : (eyes ? 0 : 1), np, m, dl:Date.now() + d.t * 1000, rem:d.t * 1000, why:''};
+         hs:practice ? 0 : (eyes ? 0 : 1), np, m, dl:Date.now() + d.t * 1000, rem:d.t * 1000, why:'', hl:d.a ? 2 : 0, hint:null};
   S.practice = !!practice; S.pview = 'h'; S.mtab = 'g';
   syncPresence(); renderAll();
 }
@@ -632,7 +650,7 @@ function endGame(ph, why) {
 }
 function strike() {
   const G = S.G; G.st++;
-  G.m.forEach(m => { if (m.t === 'q' && !m.ok) m.n = 0; });
+  if (!assist(G.df)) G.m.forEach(m => { if (m.t === 'q' && !m.ok) m.n = 0; });
   if (G.st >= lvl(G.df).s) endGame('lost', 'strikes');
 }
 function act(i, k, v) {
@@ -644,7 +662,7 @@ function act(i, k, v) {
     m.x[v] = 1; if (v === ans(m, G)) ok(); else strike();
   } else if (m.t === 'p' && k === 'press') {
     v = +v; if (!(v >= 0 && v < 4) || m.d.includes(v)) return;
-    if (v === ans(m, G)[m.d.length]) { m.d.push(v); if (m.d.length === 4) ok(); } else { m.d = []; strike(); }
+    if (v === ans(m, G)[m.d.length]) { m.d.push(v); if (m.d.length === 4) ok(); } else { if (!assist(G.df)) m.d = []; strike(); }
   } else if (m.t === 'd') {
     if (k === 'inc') m.v = (m.v + 1) % 10;
     else if (k === 'dec') m.v = (m.v + 9) % 10;
@@ -655,10 +673,44 @@ function act(i, k, v) {
   } else if (m.t === 'q' && k === 'dir') {
     if (v === ans(m, G)[m.n]) { m.n++; if (m.n === 4) ok(); } else strike();
   } else return;
+  if (m.ok && G.hint && G.hint.i === i) G.hint = null;
   if (G.ph === 'play' && G.m.every(x => x.ok)) endGame('won');
   syncPresence(); renderAll();
 }
-function leaveGame() { S.G = null; S.practice = false; S.last = null; syncPresence(); renderAll(); }
+function useHint(i) {
+  const G = S.G; if (!G || G.ph !== 'play' || !assist(G.df) || !(G.hl > 0)) return;
+  const m = G.m[i]; if (!m || m.ok) return;
+  G.hl--; G.hint = {i, until:Date.now() + 6000};
+  syncPresence(); renderAll();
+}
+function point(g, i, k, v) {
+  const m = g.m[i]; if (!m || m.ok || g.ph !== 'play') return;
+  v = v == null ? '' : String(v);
+  const same = S.pt && S.pt.g === g.id && S.pt.i === i && S.pt.k === k && S.pt.v === v;
+  S.pt = same ? null : {g:g.id, i, k, v};
+  sfx.tap(); syncPresence(); renderAll();
+}
+/* where 렌즈 is pointing: my own point (practice, or my 렌즈 tab) and every 렌즈 in the room */
+function points(g) {
+  const out = [];
+  const okp = p => p && typeof p === 'object' && p.g === g.id && Number.isInteger(p.i) && typeof p.k === 'string' && p.k.length < 8 && typeof p.v === 'string' && p.v.length < 4;
+  if (okp(S.pt)) out.push(S.pt);
+  if (!S.practice) for (const p of others()) if (p.presence.role === 'e' && okp(p.presence.pt)) out.push(p.presence.pt);
+  return out;
+}
+/* what a hint lights up on one device */
+function hintMarks(m, g) {
+  try {
+    const a = ans(m, g);
+    if (m.t === 'c') return {marks:[['cut', a]]};
+    if (m.t === 'p') return {marks:[['press', a[m.d.length]]]};
+    if (m.t === 'd') return {marks:[], num:a};
+    if (m.t === 's') return {marks:a.map((x, j) => x !== m.s[j] ? ['tog', j] : null).filter(Boolean), sw:true};
+    if (m.t === 'q') return {marks:[['dir', a[m.n]]]};
+  } catch (e) {}
+  return {marks:[]};
+}
+function leaveGame() { S.G = null; S.practice = false; S.last = null; S.pt = null; syncPresence(); renderAll(); }
 
 /* ---------- what am I looking at ---------- */
 function cur() {
@@ -733,15 +785,17 @@ function renderLobby() {
   const iHost = S.role === 'h';
   const hp = ot.find(p => p.presence.role === 'h');
   const hc = hp && hp.presence.cfg && typeof hp.presence.cfg === 'object' ? hp.presence.cfg : null;
-  const cfg = iHost || !hc ? S.cfg : {df:DIFF[hc.df] ? hc.df : 'e', cm:hc.cm === 'f' ? 'f' : 'r'};
+  const cfg = iHost || !hc ? S.cfg : {df:DIFF[hc.df] ? hc.df : 'm', cm:hc.cm === 'f' ? 'f' : 'r'};
   const lock = !iHost && on;
   const seg = (key, opts) => '<div class="seg" role="group">' + opts.map(([v, l]) =>
     '<button data-a="cfg" data-k="' + key + '" data-v="' + v + '" aria-pressed="' + (cfg[key] === v) + '"' + (lock ? ' disabled' : '') + '>' + l + '</button>').join('') + '</div>';
   setHTML($('#settings'),
-    '<div><span class="lab">난이도</span>' + seg('df', [['e','쉬움'], ['n','보통'], ['h','어려움']]) + '</div>' +
+    '<div><span class="lab">난이도</span>' + seg('df', [['m','중 (추천)'], ['e','상'], ['h','최상']]) + '</div>' +
     '<div><span class="lab">무전 방식</span>' + seg('cm', [['r','제한 무전'], ['f','자유 채팅']]) + '</div>' +
     '<p class="hint" style="flex-basis:100%"><b>' + lvl(cfg.df).label + ':</b> ' + (isBasic(cfg.df) ? '기본 규칙' : '심화 규칙(명판을 읽어야 풀립니다)') +
-      ', 장치 ' + lvl(cfg.df).n + '개, ' + Math.round(lvl(cfg.df).t / 60) + '분, 실수 ' + lvl(cfg.df).s + '번이면 실패. 처음에는 쉬움을 권합니다.</p>' +
+      ', 장치 ' + lvl(cfg.df).n + '개, ' + Math.round(lvl(cfg.df).t / 60) + '분, 실수 ' + lvl(cfg.df).s + '번이면 실패. ' +
+      (assist(cfg.df) ? '도움 기능: 렌즈가 패널을 눌러 위치를 가리킬 수 있고, 집게도 장치 이름을 보며, 힌트 2번, 실수해도 맞게 한 것은 남습니다.'
+                      : '도움 기능 없음.') + '</p>' +
     '<p class="hint" style="flex-basis:100%">' + (lock ? '설정은 집게를 맡은 사람이 정합니다. ' : '') +
     (cfg.cm === 'r' ? '제한 무전: 렌즈는 그림 신호만, 집게는 정해진 말만, 칩은 글로 보냅니다. 음성 통화 없이 할 때 재미있습니다.'
                     : '자유 채팅: 모두 글로 대화합니다. 음성 통화를 켜고 할 때도 이쪽이 편합니다.') + '</p>');
@@ -767,52 +821,66 @@ function renderLobby() {
 }
 
 const kc = (c, sees) => sees && isCol(c) ? 'k-' + c : 'k-unk';
-function modHTML(m, i, sees, can) {
+function modHTML(m, i, sees, can, fx) {
   if (!m || typeof m !== 'object') return '';
+  fx = fx || {};
   const A = 'data-a="m" data-i="' + i + '"';
+  const H = fx.hint && fx.hint.i === i && !m.ok ? hintMarks(m, fx.g) : {marks:[]};
+  const mk = (k, v) => {
+    v = v == null ? '' : String(v);
+    let c = '';
+    if ((fx.pts || []).some(p => p.i === i && p.k === k && p.v === v)) c += ' pt';
+    if (H.marks.some(([hk, hv]) => hk === k && String(hv) === v)) c += ' glow';
+    return c;
+  };
+  const P = fx.pointer ? ' data-a="m" data-i="' + i + '"' : '';
   let body = '';
   try {
     if (m.t === 'c') {
       body = '<div class="cables">' + m.c.map((c, j) =>
-        '<button class="cable ' + kc(c, sees) + (m.x[j] ? ' cut' : '') + '" ' + A + ' data-k="cut" data-v="' + j + '" aria-label="' + (j + 1) + '번 케이블 자르기">' +
+        '<button class="cable ' + kc(c, sees) + (m.x[j] ? ' cut' : '') + mk('cut', j) + '" ' + A + ' data-k="cut" data-v="' + j + '" aria-label="' + (j + 1) + '번 케이블 자르기">' +
         '<span class="no">' + (j + 1) + '</span><span class="wire"><i></i><i></i></span><span class="cl">' + (sees && isCol(c) ? CS[c] : '') + '</span></button>').join('') + '</div>';
     } else if (m.t === 'p') {
       body = '<div class="pads">' + m.p.map((p, j) => {
         const sh = String(p).slice(0, 2), co = String(p)[2];
-        return '<button class="pad ' + kc(co, sees) + (m.d.includes(j) ? ' on' : '') + '" ' + A + ' data-k="press" data-v="' + j + '" aria-label="' + (j + 1) + '번 패드">' +
+        return '<button class="pad ' + kc(co, sees) + (m.d.includes(j) ? ' on' : '') + mk('press', j) + '" ' + A + ' data-k="press" data-v="' + j + '" aria-label="' + (j + 1) + '번 패드">' +
           '<span class="no">' + (j + 1) + '</span>' + (sees && GLY[sh] ? glyph(sh) + '<span class="cl">' + (isCol(co) ? CS[co] : '') + '</span>' : '') + '</button>';
       }).join('') + '</div>';
     } else if (m.t === 'd') {
-      body = '<div class="tiles">' + m.a.map(a => {
+      body = '<div class="tiles">' + m.a.map((a, j) => {
         const d = String(a)[0], co = String(a)[1];
-        return '<span class="tile ' + kc(co, sees) + '">' + (sees && AV[d] ? arrow(d) + '<span class="cl">' + (isCol(co) ? CS[co] : '') + '</span>' : '') + '</span>';
-      }).join('') + '</div><div class="dial"><button class="key" ' + A + ' data-k="dec" aria-label="다이얼 내리기">−</button><output>' + (+m.v || 0) +
-        '</output><button class="key" ' + A + ' data-k="inc" aria-label="다이얼 올리기">+</button><button class="key okbtn" ' + A + ' data-k="ok">확정</button></div>';
+        return '<span class="tile ' + kc(co, sees) + mk('tile', j) + '"' + (P ? P + ' data-k="tile" data-v="' + j + '"' : '') + '>' + (sees && AV[d] ? arrow(d) + '<span class="cl">' + (isCol(co) ? CS[co] : '') + '</span>' : '') + '</span>';
+      }).join('') + '</div><div class="dial"><button class="key' + mk('dec') + '" ' + A + ' data-k="dec" aria-label="다이얼 내리기">−</button><output>' + (+m.v || 0) +
+        '</output><button class="key' + mk('inc') + '" ' + A + ' data-k="inc" aria-label="다이얼 올리기">+</button><button class="key okbtn' + mk('ok') + '" ' + A + ' data-k="ok">확정</button>' +
+        (H.num != null ? '<span class="hintnum">힌트: ' + H.num + '에 맞추기</span>' : '') + '</div>';
     } else if (m.t === 's') {
       body = '<div class="sws">' + m.l.map((c, j) =>
-        '<div class="swc"><span class="led ' + kc(c, sees) + '"></span><span class="cl">' + (sees && isCol(c) ? CS[c] : '') + '</span>' +
-        '<button class="sw ' + (m.s[j] ? 'up' : 'dn') + '" ' + A + ' data-k="tog" data-v="' + j + '" aria-label="' + (j + 1) + '번 스위치, 지금 ' + (m.s[j] ? '올림' : '내림') + '"><i></i></button>' +
-        '<span class="no">' + (j + 1) + '</span></div>').join('') + '</div><button class="key okbtn" ' + A + ' data-k="ok">확정</button>';
+        '<div class="swc"><span class="led ' + kc(c, sees) + mk('led', j) + '"' + (P ? P + ' data-k="led" data-v="' + j + '"' : '') + '></span><span class="cl">' + (sees && isCol(c) ? CS[c] : '') + '</span>' +
+        '<button class="sw ' + (m.s[j] ? 'up' : 'dn') + mk('tog', j) + '" ' + A + ' data-k="tog" data-v="' + j + '" aria-label="' + (j + 1) + '번 스위치, 지금 ' + (m.s[j] ? '올림' : '내림') + '"><i></i></button>' +
+        '<span class="no">' + (j + 1) + '</span></div>').join('') + '</div>' + (H.sw ? '<span class="hintnum">' + (H.marks.length ? '힌트: 빛나는 스위치를 바꾸고 확정' : '힌트: 지금 상태로 확정') + '</span>' : '') +
+        '<button class="key okbtn' + mk('ok') + '" ' + A + ' data-k="ok">확정</button>';
     } else if (m.t === 'q') {
-      body = '<div class="dots">' + m.q.map(c => '<span class="dot ' + kc(c, sees) + '">' + (sees && isCol(c) ? '<b>' + CS[c] + '</b>' : '') + '</span>').join('<span class="to">›</span>') + '</div>' +
+      body = '<div class="dots">' + m.q.map((c, j) => '<span class="dot ' + kc(c, sees) + mk('dot', j) + '"' + (P ? P + ' data-k="dot" data-v="' + j + '"' : '') + '>' + (sees && isCol(c) ? '<b>' + CS[c] + '</b>' : '') + '</span>').join('<span class="to">›</span>') + '</div>' +
         '<div class="pips" aria-label="입력 ' + (+m.n || 0) + '/4">' + [0,1,2,3].map(k => '<i class="' + (k < m.n ? 'on' : '') + '"></i>').join('') + '</div>' +
         '<div class="dpad">' + [['u','▲','위'],['l','◀','왼쪽'],['r','▶','오른쪽'],['d','▼','아래']].map(([v, s, l]) =>
-          '<button class="key" ' + A + ' data-k="dir" data-v="' + v + '" aria-label="' + l + '">' + s + '</button>').join('') + '</div>';
+          '<button class="key' + mk('dir', v) + '" ' + A + ' data-k="dir" data-v="' + v + '" aria-label="' + l + '">' + s + '</button>').join('') + '</div>';
     }
   } catch (e) { body = ''; }
-  return '<article class="mod' + (m.ok ? ' ok' : '') + (can ? '' : ' ro') + '"><header><span class="slot">장치 ' + (i + 1) + '</span>' +
-    '<span class="nm">' + (sees ? (MN[m.t] || '') : '') + '</span><span class="st"></span></header>' + body + '</article>';
+  const hb = fx.hintBtn && !m.ok ? '<button class="hintbtn" data-a="hint" data-i="' + i + '"' + (fx.hintBtn > 0 ? '' : ' disabled') + '>힌트</button>' : '';
+  return '<article class="mod' + (m.ok ? ' ok' : '') + (can || fx.pointer ? '' : ' ro') + (fx.pointer ? ' pointable' : '') + '"><header><span class="slot">장치 ' + (i + 1) + '</span>' +
+    '<span class="nm">' + (sees || fx.names ? (MN[m.t] || '') : '') + '</span>' + hb + '<span class="st"></span></header>' + body + '</article>';
 }
-function panelHTML(g, sees, can) {
+function panelHTML(g, sees, can, fx) {
   const np = g.np;
   const plate = isBasic(g.df)
-    ? (sees ? '' : '<div class="nameplate blind">카메라 고장으로 색과 기호가 보이지 않습니다 · 렌즈에게 물어보세요</div>')
+    ? (sees ? '' : '<div class="nameplate blind">카메라 고장으로 색과 기호가 보이지 않습니다 · 렌즈에게 물어보세요' +
+        (assist(g.df) ? '<br>렌즈가 가리킨 곳은 주황 테두리로 깜박입니다. 막히면 장치의 힌트 버튼을 누르세요 (남은 힌트 ' + (+g.hl || 0) + '번).' : '') + '</div>')
     : sees
     ? '<div class="nameplate"><span><b>일련번호</b><span class="sn">' + esc(String(np.sn).slice(0, 8)) + '</span></span>' +
       '<span><b>전지</b><span class="batt">' + '<i></i>'.repeat(Math.min(4, Math.max(0, +np.bat || 0))) + '</span> ' + (+np.bat || 0) + '개</span>' +
       '<span><b>상태등</b><span class="lamp ' + kc(np.lamp, true) + '"></span> ' + (CN[np.lamp] || '') + '</span></div>'
     : '<div class="nameplate blind">명판 판독 불가 · 카메라 고장으로 색과 글자가 보이지 않습니다</div>';
-  return plate + '<div class="mods">' + g.m.map((m, i) => modHTML(m, i, sees, can)).join('') + '</div>';
+  return plate + '<div class="mods">' + g.m.map((m, i) => modHTML(m, i, sees, can, fx)).join('') + '</div>';
 }
 
 const MANUAL = {
@@ -871,11 +939,23 @@ const MANUAL_B = {
     '<p class="note">틀리면 처음부터 다시 입력합니다.</p>'
 };
 function manualHTML(g) {
-  const tabs = [['g','공통'],['c','케이블'],['p','도형 패드'],['d','다이얼'],['s','스위치'],['q','순서 입력']];
+  const help = assist(g.df);
+  const here = new Set(g.m.map(m => m && m.t));
+  let tabs = [['g','공통'],['c','케이블'],['p','도형 패드'],['d','다이얼'],['s','스위치'],['q','순서 입력']];
+  if (help) { tabs = tabs.filter(([k]) => k === 'g' || here.has(k)); if (!tabs.some(([k]) => k === S.mtab)) S.mtab = 'g'; }
+  let page = (isBasic(g.df) ? MANUAL_B : MANUAL)[S.mtab] || MANUAL.g;
+  if (help) {
+    page = page.replace('순서가 틀리면 처음부터 다시 눌러야 합니다.', '순서가 틀려도 맞게 누른 패드는 그대로 남습니다.')
+               .replace('<p class="note">틀리면 처음부터 다시 입력합니다.</p>', '<p class="note">틀려도 맞게 누른 것은 그대로 남습니다.</p>');
+    page = page.replace('패널에 어떤 장치가 달렸는지는 렌즈만 볼 수 있습니다. 장치 번호와 종류부터 물어보세요.', '이번 패널의 장치는 위 목록에 나옵니다. 누르면 그 장치의 규칙이 열립니다. 색과 기호는 렌즈에게 물어보세요.');
+    if (S.mtab === 'g') page += '<p class="note">도움 기능: 렌즈는 패널을 눌러 집게에게 위치를 가리킬 수 있습니다. 막히면 집게가 장치마다 힌트를 쓸 수 있습니다 (한 판에 2번).</p>';
+  }
   return '<div class="plate manual"><div class="head"><h2>정비 매뉴얼</h2><span>' + (isBasic(g.df) ? '기본 규칙' : '심화 규칙') + ' · 칩 전용 · 패널 신호 없음</span></div>' +
-    '<div class="slots">' + g.m.map((m, i) => '<span class="' + (m && m.ok ? 'ok' : '') + '">장치 ' + (i + 1) + (m && m.ok ? ' 해결' : '') + '</span>').join('') + '</div>' +
+    '<div class="slots">' + g.m.map((m, i) => help && m
+      ? '<button class="' + (m.ok ? 'ok' : '') + (S.mtab === m.t ? ' cur' : '') + '" data-a="mtab" data-v="' + m.t + '">장치 ' + (i + 1) + ' ' + (MN[m.t] || '') + (m.ok ? ' 해결' : '') + '</button>'
+      : '<span class="' + (m && m.ok ? 'ok' : '') + '">장치 ' + (i + 1) + (m && m.ok ? ' 해결' : '') + '</span>').join('') + '</div>' +
     '<div class="tabs" role="tablist">' + tabs.map(([k, l]) => '<button role="tab" data-a="mtab" data-v="' + k + '" aria-selected="' + (S.mtab === k) + '">' + l + '</button>').join('') + '</div>' +
-    '<div class="page">' + ((isBasic(g.df) ? MANUAL_B : MANUAL)[S.mtab] || MANUAL.g) + '</div></div>';
+    '<div class="page">' + page + '</div></div>';
 }
 
 /* radio */
@@ -917,13 +997,17 @@ function renderRadio(g) {
 function renderGame(c) {
   const g = c.g, vr = viewRole();
   setHTML($('#strikes'), Array.from({length:lvl(g.df).s}, (_, i) => '<i class="' + (i < g.st ? 'on' : '') + '"></i>').join(''));
-  $('#prog').textContent = '장치 ' + g.m.filter(m => m && m.ok).length + '/' + g.m.length + ' 해결';
+  $('#prog').textContent = '장치 ' + g.m.filter(m => m && m.ok).length + '/' + g.m.length + ' 해결' + (assist(g.df) ? ' · 힌트 ' + (+g.hl || 0) + '번 남음' : '');
   setHTML($('#pv'), S.practice
     ? '<div class="seg" role="group">' + ['h','e','b'].map(r => '<button data-a="pview" data-v="' + r + '" aria-pressed="' + (S.pview === r) + '">' + ROLE[r].nm + ' 화면</button>').join('') + '</div> <button class="key" data-a="leave">연습 종료</button>'
     : '');
   $('#mebadge').textContent = S.practice ? '혼자 연습' : ROLE[vr].nm + ' · ' + ROLE[vr].job + (vr === 'h' && g.hs ? ' (2인 모드)' : '');
   const sees = vr === 'e' || (vr === 'h' && !!g.hs);
-  setHTML($('#view'), vr === 'b' ? manualHTML(g) : panelHTML(g, sees, vr === 'h' && c.mine));
+  const help = assist(g.df) && g.ph === 'play';
+  const fx = {g, pts:help ? points(g) : [], hint:g.hint, names:help && vr === 'h',
+              pointer:help && vr === 'e', hintBtn:help && vr === 'h' && c.mine ? Math.max(0, +g.hl || 0) || -1 : 0};
+  setHTML($('#view'), vr === 'b' ? manualHTML(g)
+    : (fx.pointer ? '<p class="tip">패널을 누르면 집게 화면에 그 위치가 주황 테두리로 표시됩니다. 다시 누르면 지워집니다.</p>' : '') + panelHTML(g, sees, vr === 'h' && c.mine, fx));
   $('#stage').classList.toggle('solo', S.practice);
   $('#radio').hidden = S.practice;
   if (!S.practice) renderRadio(g);
@@ -980,6 +1064,7 @@ setInterval(() => {
   const G = S.G;
   if (G && G.ph === 'play') {
     if (G.dl - Date.now() <= 0) { endGame('lost', 'time'); syncPresence(); renderAll(); return; }
+    if (G.hint && Date.now() > G.hint.until) { G.hint = null; syncPresence(); renderAll(); }
     if (!S.practice && Date.now() - lastSync > 1000) { lastSync = Date.now(); syncPresence(); }
   }
   const c = cur();
@@ -1017,9 +1102,12 @@ document.addEventListener('click', e => {
   if (a === 'pview') { S.pview = v; renderAll(); return; }
   if (a === 'mtab') { S.mtab = v; renderAll(); return; }
   if (a === 'm') {
-    const c = cur(); if (!c || !c.mine || viewRole() !== 'h') return;
+    const c = cur(); if (!c) return;
+    if (viewRole() === 'e' && assist(c.g.df)) { point(c.g, +b.dataset.i, b.dataset.k, v); return; }
+    if (!c.mine || viewRole() !== 'h' || !ACT_K.has(b.dataset.k)) return;
     sfx.tap(); act(+b.dataset.i, b.dataset.k, v); return;
   }
+  if (a === 'hint') { const c = cur(); if (c && c.mine && viewRole() === 'h') useHint(+b.dataset.i); return; }
   if (a === 'tok') { if (S.tray.length < 10) { S.tray.push(v); renderAll(); } return; }
   if (a === 'tokdel') { S.tray.pop(); renderAll(); return; }
   if (a === 'toksend') { if (S.tray.length) { const body = S.tray.join(','); S.tray = []; say('s', body); } return; }
@@ -1076,7 +1164,7 @@ function boot(d) {
 const hot = window.claude && window.claude.hot;
 if (hot && hot.snapshot) hot.snapshot(() => ({name:S.name, room:S.room, role:S.role}));
 if (hot && hot.ready) hot.ready(boot); else boot((hot && hot.data) || {});
-if (window.__TEST__) window.__bb = {S, solve, gen, genPlate, act, startGame, cur, basic, genB, ans, DIFF};
+if (window.__TEST__) window.__bb = {S, solve, gen, genPlate, act, startGame, cur, basic, genB, ans, DIFF, hintMarks, points};
 })();
 </script>
 </body>
